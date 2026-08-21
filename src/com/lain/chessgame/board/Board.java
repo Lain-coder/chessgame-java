@@ -59,6 +59,16 @@ public class Board {
     public int[][] getBoard() {
         return board;
     }
+
+    public int getPiece(int row, int col) {
+        return board[row][col];
+    }
+
+    /** 移动棋子；调用前应先用 MoveRule 校验走法。 */
+    public void movePiece(int fromRow, int fromCol, int toRow, int toCol) {
+        board[toRow][toCol] = board[fromRow][fromCol];
+        board[fromRow][fromCol] = 0;
+    }
     //打印棋盘
     public void setBoard(int[][] board) {
         this.board = board;
