@@ -1,6 +1,7 @@
 package com.lain.chessgame.ui;
 
 import com.lain.chessgame.game.GameController;
+import com.lain.chessgame.game.BotPlayer;
 import com.lain.chessgame.game.gamerule.GameState;
 import com.lain.chessgame.piece.pieceset.Bishop;
 import com.lain.chessgame.piece.pieceset.King;
@@ -18,10 +19,13 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
+import javax.swing.JComboBox;
+import javax.swing.SwingWorker;
 import javax.imageio.ImageIO;
 import java.awt.BorderLayout;
 import java.awt.AlphaComposite;
 import java.awt.Color;
+import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics;
@@ -29,6 +33,7 @@ import java.awt.Graphics2D;
 import java.awt.GridLayout;
 import java.awt.Image;
 import java.awt.RenderingHints;
+import java.awt.Toolkit;
 import java.awt.image.BufferedImage;
 import java.util.ArrayDeque;
 import java.util.Collections;
@@ -37,53 +42,123 @@ import java.util.List;
 import java.util.Map;
 
 public class ChessFrame extends JFrame {
+    private static final Color APP_BACKGROUND = new Color(24, 22, 31);
+    private static final Color PANEL_BACKGROUND = new Color(39, 36, 49);
+    private static final Color PANEL_RAISED = new Color(54, 49, 65);
+    private static final Color TEXT_PRIMARY = new Color(247, 242, 235);
+    private static final Color TEXT_MUTED = new Color(184, 177, 192);
+    private static final Color ACCENT = new Color(238, 146, 122);
     private static final int PIECE_ICON_INSET = 8;
     private static final String PIECE_IMAGE_PATH = "pieceImagePath";
-    private final GameController game = new GameController();
+    private GameController game = new GameController();
+    private final BotPlayer bot = new BotPlayer();
+    private BotPlayer.Difficulty botDifficulty;
+    private SwingWorker<GameController.Move, Void> botWorker;
+    private boolean botThinking;
+    private int gameGeneration;
     private final Map<String, ImageIcon> pieceIconCache = new HashMap<>();
     private final Map<String, BufferedImage> transparentPieceCache = new HashMap<>();
     private final ChessBoardPanel chessPanel = new ChessBoardPanel();
     private final JLabel statusLabel = new JLabel();
     private final JTextArea notationArea = new JTextArea();
+    private final JLabel opponentLabel = new JLabel();
+    private final JComboBox<String> modeCombo = new JComboBox<>(new String[]{
+            "双人对战", "Bot · 简单", "Bot · 普通", "Bot · 困难"
+    });
     private int selectedRow = -1;
     private int selectedCol = -1;
     private List<GameController.Square> legalMoves = Collections.emptyList();
+    private int lastFromRow = -1;
+    private int lastFromCol = -1;
+    private int lastToRow = -1;
+    private int lastToCol = -1;
 
     public ChessFrame() {
-        setTitle("国际象棋");
-        setSize(920, 670);
+        setTitle("Chen's Chess");
+        Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
+        setSize(Math.min(1080, Math.max(720, screen.width - 48)),
+                Math.min(740, Math.max(600, screen.height - 70)));
+        setMinimumSize(new Dimension(720, 600));
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
-        setLayout(new BorderLayout());
-        add(chessPanel, BorderLayout.CENTER);
-        add(createSidePanel(), BorderLayout.EAST);
+        setIconImage(new ImageIcon(getClass().getResource("/images/icon.png")).getImage());
+        JPanel root = new JPanel(new BorderLayout(18, 18));
+        root.setBackground(APP_BACKGROUND);
+        root.setBorder(BorderFactory.createEmptyBorder(18, 18, 18, 18));
+        root.add(chessPanel, BorderLayout.CENTER);
+        root.add(createSidePanel(), BorderLayout.EAST);
+        setContentPane(root);
         refreshView();
         setVisible(true);
     }
 
     private JPanel createSidePanel() {
-        JPanel panel = new JPanel(new BorderLayout(8, 8));
-        panel.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
-        panel.setPreferredSize(new Dimension(260, 0));
-        statusLabel.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 15));
-        panel.add(statusLabel, BorderLayout.NORTH);
+        JPanel panel = new JPanel(new BorderLayout(12, 14));
+        panel.setBackground(PANEL_BACKGROUND);
+        panel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(61, 56, 73)),
+                BorderFactory.createEmptyBorder(18, 18, 18, 18)));
+        panel.setPreferredSize(new Dimension(300, 0));
+
+        JPanel header = new JPanel();
+        header.setOpaque(false);
+        header.setLayout(new javax.swing.BoxLayout(header, javax.swing.BoxLayout.Y_AXIS));
+        JLabel title = new JLabel("CHEN'S CHESS");
+        title.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 22));
+        title.setForeground(TEXT_PRIMARY);
+        JLabel modeTitle = new JLabel("对局模式");
+        modeTitle.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
+        modeTitle.setForeground(TEXT_MUTED);
+        modeCombo.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
+        modeCombo.setForeground(TEXT_PRIMARY);
+        modeCombo.setBackground(PANEL_RAISED);
+        modeCombo.setFocusable(false);
+        modeCombo.setMaximumSize(new Dimension(Integer.MAX_VALUE, 38));
+        modeCombo.addActionListener(event -> changeMode());
+        opponentLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
+        opponentLabel.setForeground(TEXT_MUTED);
+        statusLabel.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 17));
+        statusLabel.setForeground(TEXT_PRIMARY);
+        header.add(title);
+        header.add(javax.swing.Box.createVerticalStrut(18));
+        header.add(modeTitle);
+        header.add(javax.swing.Box.createVerticalStrut(6));
+        header.add(modeCombo);
+        header.add(javax.swing.Box.createVerticalStrut(12));
+        header.add(opponentLabel);
+        header.add(javax.swing.Box.createVerticalStrut(14));
+        header.add(statusLabel);
+        panel.add(header, BorderLayout.NORTH);
+
         notationArea.setEditable(false);
         notationArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 14));
-        panel.add(new JScrollPane(notationArea), BorderLayout.CENTER);
+        notationArea.setForeground(TEXT_PRIMARY);
+        notationArea.setBackground(new Color(31, 29, 40));
+        notationArea.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        JScrollPane scrollPane = new JScrollPane(notationArea);
+        scrollPane.setBorder(BorderFactory.createTitledBorder(
+                BorderFactory.createLineBorder(PANEL_RAISED), "走棋记录", 0, 0,
+                new Font(Font.SANS_SERIF, Font.BOLD, 12), TEXT_MUTED));
+        panel.add(scrollPane, BorderLayout.CENTER);
 
-        JPanel actions = new JPanel(new GridLayout(3, 2, 6, 6));
-        actions.add(actionButton("请求和棋", this::requestDraw));
-        actions.add(actionButton("接受和棋", this::acceptDraw));
-        actions.add(actionButton("拒绝和棋", this::declineDraw));
-        actions.add(actionButton("请求悔棋", this::requestUndo));
-        actions.add(actionButton("接受悔棋", this::acceptUndo));
-        actions.add(actionButton("拒绝悔棋", this::declineUndo));
+        JPanel actions = new JPanel(new GridLayout(2, 2, 8, 8));
+        actions.setOpaque(false);
+        actions.add(actionButton("新对局", this::startNewGame, true));
+        actions.add(actionButton("悔棋", this::undoMove, false));
+        actions.add(actionButton("提议和棋", this::handleDraw, false));
+        actions.add(actionButton("清除选择", () -> { clearSelection(); refreshView(); }, false));
         panel.add(actions, BorderLayout.SOUTH);
         return panel;
     }
 
-    private JButton actionButton(String text, Runnable action) {
+    private JButton actionButton(String text, Runnable action, boolean primary) {
         JButton button = new JButton(text);
+        button.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
+        button.setForeground(primary ? new Color(37, 31, 38) : TEXT_PRIMARY);
+        button.setBackground(primary ? ACCENT : PANEL_RAISED);
+        button.setFocusPainted(false);
+        button.setBorder(BorderFactory.createEmptyBorder(10, 8, 10, 8));
+        button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         button.addActionListener(event -> action.run());
         return button;
     }
@@ -99,6 +174,7 @@ public class ChessFrame extends JFrame {
                 button.setFocusPainted(false);
                 button.setBorderPainted(false);
                 button.setBorder(BorderFactory.createEmptyBorder());
+                button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
                 final int currentRow = row;
                 final int currentCol = col;
                 button.addActionListener(event -> handleSquareClick(currentRow, currentCol));
@@ -270,6 +346,10 @@ public class ChessFrame extends JFrame {
             button.setBorderPainted(true);
             button.setBorder(BorderFactory.createLineBorder(
                     piece == 0 ? new Color(57, 150, 75) : new Color(196, 55, 55), 4));
+        } else if ((row == lastFromRow && col == lastFromCol)
+                || (row == lastToRow && col == lastToCol)) {
+            button.setBorderPainted(true);
+            button.setBorder(BorderFactory.createLineBorder(new Color(247, 195, 95, 190), 3));
         } else {
             button.setBorderPainted(false);
             button.setBorder(BorderFactory.createEmptyBorder());
@@ -285,7 +365,10 @@ public class ChessFrame extends JFrame {
         private ChessBoardPanel() {
             setLayout(null);
             setPreferredSize(new Dimension(650, 650));
-            setBackground(new Color(35, 35, 35));
+            setBackground(new Color(31, 29, 39));
+            setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(new Color(61, 56, 73)),
+                    BorderFactory.createEmptyBorder(10, 10, 10, 10)));
         }
 
         @Override
@@ -358,17 +441,22 @@ public class ChessFrame extends JFrame {
     }
 
     private void handleSquareClick(int row, int col) {
-        if (game.getGameState().isGameOver()) return;
+        if (game.getGameState().isGameOver() || botThinking || isBotTurn()) return;
         int clickedPiece = game.getBoard().getPiece(row, col);
         if (selectedRow == -1 || game.isCurrentPlayerPiece(clickedPiece)) {
             selectPiece(clickedPiece, row, col);
         } else if (isLegalDestination(row, col)) {
-            game.move(selectedRow, selectedCol, row, col, choosePromotionPiece(selectedRow, selectedCol, row));
+            int fromRow = selectedRow;
+            int fromCol = selectedCol;
+            if (game.move(fromRow, fromCol, row, col, choosePromotionPiece(fromRow, fromCol, row))) {
+                rememberMove(fromRow, fromCol, row, col);
+            }
             clearSelection();
         } else {
             clearSelection();
         }
         refreshView();
+        triggerBotTurn();
     }
 
     private void selectPiece(int piece, int row, int col) {
@@ -396,6 +484,106 @@ public class ChessFrame extends JFrame {
         return Queen.WHITE_QUEEN;
     }
 
+    private void changeMode() {
+        switch (modeCombo.getSelectedIndex()) {
+            case 1: botDifficulty = BotPlayer.Difficulty.EASY; break;
+            case 2: botDifficulty = BotPlayer.Difficulty.MEDIUM; break;
+            case 3: botDifficulty = BotPlayer.Difficulty.HARD; break;
+            default: botDifficulty = null;
+        }
+        startNewGame();
+    }
+
+    private void startNewGame() {
+        if (botWorker != null) botWorker.cancel(true);
+        botWorker = null;
+        botThinking = false;
+        gameGeneration++;
+        game = new GameController();
+        lastFromRow = lastFromCol = lastToRow = lastToCol = -1;
+        clearSelection();
+        refreshView();
+    }
+
+    private boolean isBotTurn() {
+        return botDifficulty != null && !game.isWhiteTurn();
+    }
+
+    private void rememberMove(int fromRow, int fromCol, int toRow, int toCol) {
+        lastFromRow = fromRow;
+        lastFromCol = fromCol;
+        lastToRow = toRow;
+        lastToCol = toCol;
+    }
+
+    private void triggerBotTurn() {
+        if (!isBotTurn() || game.getGameState().isGameOver()) return;
+        botThinking = true;
+        updateStatus();
+        final int generation = gameGeneration;
+        final GameController searchPosition = game.copy();
+        botWorker = new SwingWorker<GameController.Move, Void>() {
+            @Override
+            protected GameController.Move doInBackground() {
+                return bot.chooseMove(searchPosition, botDifficulty);
+            }
+
+            @Override
+            protected void done() {
+                if (isCancelled() || generation != gameGeneration) return;
+                try {
+                    GameController.Move move = get();
+                    if (move != null && game.move(move.getFromRow(), move.getFromCol(),
+                            move.getToRow(), move.getToCol(), Queen.WHITE_QUEEN)) {
+                        rememberMove(move.getFromRow(), move.getFromCol(), move.getToRow(), move.getToCol());
+                    }
+                } catch (Exception exception) {
+                    JOptionPane.showMessageDialog(ChessFrame.this,
+                            "Bot 思考失败：" + exception.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
+                } finally {
+                    botThinking = false;
+                    botWorker = null;
+                    refreshView();
+                }
+            }
+        };
+        botWorker.execute();
+    }
+
+    private void undoMove() {
+        if (botWorker != null) {
+            botWorker.cancel(true);
+            botWorker = null;
+            botThinking = false;
+            gameGeneration++;
+        }
+        boolean changed = game.undoLastMove();
+        // 人机模式通常一次撤回“电脑一步 + 玩家一步”，重新轮到玩家。
+        if (changed && botDifficulty != null && game.isWhiteTurn() && !game.getMoveHistory().isEmpty()) {
+            game.undoLastMove();
+        }
+        if (!changed) Toolkit.getDefaultToolkit().beep();
+        lastFromRow = lastFromCol = lastToRow = lastToCol = -1;
+        clearSelection();
+        refreshView();
+    }
+
+    private void handleDraw() {
+        if (game.getGameState().isGameOver()) return;
+        if (botDifficulty != null) {
+            game.requestDraw();
+            game.declineDraw();
+            JOptionPane.showMessageDialog(this, "Bot 礼貌地拒绝了和棋，并示意继续对局。",
+                    "和棋提议", JOptionPane.INFORMATION_MESSAGE);
+        } else if (game.getGameState().getDrawOfferer() == null) {
+            game.requestDraw();
+        } else {
+            game.acceptDraw();
+        }
+        clearSelection();
+        refreshView();
+    }
+
     private void requestDraw() { showActionResult(game.requestDraw(), "已提出和棋请求。", "当前不能提出和棋请求。"); }
     private void acceptDraw() { showActionResult(game.acceptDraw(), "双方同意和棋。", "当前没有可接受的和棋请求。"); }
     private void declineDraw() { game.declineDraw(); refreshView(); }
@@ -410,8 +598,10 @@ public class ChessFrame extends JFrame {
     }
 
     private void updateStatus() {
+        opponentLabel.setText(botDifficulty == null ? "黑方：本地玩家" : "黑方：" + botDifficulty);
         GameState state = game.getGameState();
         if (state.isGameOver()) statusLabel.setText(resultText(state.getResult()));
+        else if (botThinking) statusLabel.setText("Bot 正在思考…");
         else if (state.getDrawOfferer() != null) statusLabel.setText(
                 (state.getDrawOfferer() == GameState.Player.WHITE ? "白方" : "黑方") + "请求和棋");
         else statusLabel.setText((game.isWhiteTurn() ? "白方" : "黑方") + "走棋"
@@ -438,6 +628,7 @@ public class ChessFrame extends JFrame {
             if (index % 2 == 0) text.append(index / 2 + 1).append(". ");
             text.append(moves.get(index)).append(index % 2 == 0 ? "  " : "\n");
         }
+        if (moves.isEmpty()) text.append("棋谱会显示在这里…");
         notationArea.setText(text.toString());
         notationArea.setCaretPosition(notationArea.getDocument().getLength());
     }

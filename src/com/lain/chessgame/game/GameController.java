@@ -55,6 +55,26 @@ public class GameController {
         }
     }
 
+    /** 一步完整走法，供界面和电脑棋手共享。 */
+    public static final class Move {
+        private final int fromRow;
+        private final int fromCol;
+        private final int toRow;
+        private final int toCol;
+
+        public Move(int fromRow, int fromCol, int toRow, int toCol) {
+            this.fromRow = fromRow;
+            this.fromCol = fromCol;
+            this.toRow = toRow;
+            this.toCol = toCol;
+        }
+
+        public int getFromRow() { return fromRow; }
+        public int getFromCol() { return fromCol; }
+        public int getToRow() { return toRow; }
+        public int getToCol() { return toCol; }
+    }
+
     private final Board board = new Board();
     private final GameState gameState = new GameState();
     private boolean whiteTurn = true;
@@ -72,6 +92,27 @@ public class GameController {
 
     public GameController() {
         gameState.recordPosition(positionKey());
+    }
+
+    private GameController(GameController source) {
+        board.setBoard(copyBoard(source.board.getBoard()));
+        whiteTurn = source.whiteTurn;
+        whiteKingMoved = source.whiteKingMoved;
+        blackKingMoved = source.blackKingMoved;
+        whiteLeftRookMoved = source.whiteLeftRookMoved;
+        whiteRightRookMoved = source.whiteRightRookMoved;
+        blackLeftRookMoved = source.blackLeftRookMoved;
+        blackRightRookMoved = source.blackRightRookMoved;
+        enPassantPawnRow = source.enPassantPawnRow;
+        enPassantPawnCol = source.enPassantPawnCol;
+        gameState.restore(source.gameState.createSnapshot());
+        moveHistory.addAll(source.moveHistory);
+        undoRequester = source.undoRequester;
+    }
+
+    /** 返回完全独立的对局副本，Bot 可以安全地在后台推演。 */
+    public GameController copy() {
+        return new GameController(this);
     }
 
     public Board getBoard() {
@@ -155,6 +196,30 @@ public class GameController {
             }
         }
         return moves;
+    }
+
+    /** 返回当前一方的全部合法走法。 */
+    public List<Move> getAllLegalMoves() {
+        if (gameState.isGameOver()) return Collections.emptyList();
+        List<Move> moves = new ArrayList<>();
+        for (int fromRow = 0; fromRow < Board.SIZE_X; fromRow++) {
+            for (int fromCol = 0; fromCol < Board.SIZE_Y; fromCol++) {
+                if (!isCurrentPlayerPiece(board.getPiece(fromRow, fromCol))) continue;
+                for (Square target : getLegalMoves(fromRow, fromCol)) {
+                    moves.add(new Move(fromRow, fromCol, target.getRow(), target.getCol()));
+                }
+            }
+        }
+        return moves;
+    }
+
+    /** 无需双方确认地撤销最后一步，供“悔棋”按钮使用。 */
+    public boolean undoLastMove() {
+        if (moveSnapshots.isEmpty()) return false;
+        restore(moveSnapshots.pop());
+        if (!moveHistory.isEmpty()) moveHistory.remove(moveHistory.size() - 1);
+        undoRequester = null;
+        return true;
     }
 
     public boolean move(int fromRow, int fromCol, int toRow, int toCol, int promotionPiece) {
