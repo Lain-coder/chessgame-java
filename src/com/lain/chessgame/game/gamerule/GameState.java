@@ -187,7 +187,8 @@ public class GameState {
             return false;
         }
 
-        int minorPieceCount = 0;
+        int knightCount = 0;
+        int bishopCount = 0;
         Integer bishopSquareColor = null;
 
         for (int row = 0; row < board.length; row++) {
@@ -206,12 +207,10 @@ public class GameState {
                     return false;
                 }
 
-                minorPieceCount++;
                 if (pieceType == 2) {
-                    if (minorPieceCount > 1) {
-                        return false;
-                    }
+                    knightCount++;
                 } else {
+                    bishopCount++;
                     int squareColor = (row + col) % 2;
                     if (bishopSquareColor != null && bishopSquareColor != squareColor) {
                         return false;
@@ -220,6 +219,11 @@ public class GameState {
                 }
             }
         }
-        return minorPieceCount <= 1 || bishopSquareColor != null;
+        int minorPieceCount = knightCount + bishopCount;
+        if (minorPieceCount <= 1) {
+            return true;
+        }
+        // 只要存在马和象，或存在两匹及以上的马，就仍可能形成将死局面。
+        return knightCount == 0 && bishopSquareColor != null;
     }
 }

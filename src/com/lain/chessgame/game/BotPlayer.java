@@ -42,7 +42,7 @@ public final class BotPlayer {
         int bestScore = Integer.MAX_VALUE;
         List<GameController.Move> bestMoves = new ArrayList<>();
         for (GameController.Move move : moves) {
-            if (Thread.currentThread().isInterrupted()) return moves.get(0);
+            if (Thread.currentThread().isInterrupted()) return moves.getFirst();
             GameController next = play(position, move);
             int score = minimax(next, depth - 1, Integer.MIN_VALUE + 1, Integer.MAX_VALUE - 1);
             if (score < bestScore) {
@@ -104,7 +104,7 @@ public final class BotPlayer {
     }
 
     private GameController play(GameController position, GameController.Move move) {
-        GameController next = position.copy();
+        GameController next = position.copyForSearch();
         next.move(move.getFromRow(), move.getFromCol(), move.getToRow(), move.getToCol(), Queen.WHITE_QUEEN);
         return next;
     }
@@ -128,7 +128,7 @@ public final class BotPlayer {
                 int piece = board[row][col];
                 if (piece == 0) continue;
                 int value = PIECE_VALUES[Math.abs(piece)];
-                int centerBonus = (3 - Math.abs(3 - col)) + (3 - Math.abs(3 - row));
+                int centerBonus = Math.min(row, 7 - row) + Math.min(col, 7 - col);
                 if (Math.abs(piece) == 1 || Math.abs(piece) == 2 || Math.abs(piece) == 3) value += centerBonus * 3;
                 score += piece > 0 ? value : -value;
             }

@@ -77,6 +77,7 @@ public class GameController {
 
     private final Board board = new Board();
     private final GameState gameState = new GameState();
+    private final boolean searchMode;
     private boolean whiteTurn = true;
     private boolean whiteKingMoved;
     private boolean blackKingMoved;
@@ -91,10 +92,12 @@ public class GameController {
     private GameState.Player undoRequester;
 
     public GameController() {
+        searchMode = false;
         gameState.recordPosition(positionKey());
     }
 
-    private GameController(GameController source) {
+    private GameController(GameController source, boolean searchMode) {
+        this.searchMode = searchMode;
         board.setBoard(copyBoard(source.board.getBoard()));
         whiteTurn = source.whiteTurn;
         whiteKingMoved = source.whiteKingMoved;
@@ -106,13 +109,20 @@ public class GameController {
         enPassantPawnRow = source.enPassantPawnRow;
         enPassantPawnCol = source.enPassantPawnCol;
         gameState.restore(source.gameState.createSnapshot());
-        moveHistory.addAll(source.moveHistory);
-        undoRequester = source.undoRequester;
+        if (!searchMode) {
+            moveHistory.addAll(source.moveHistory);
+            undoRequester = source.undoRequester;
+        }
     }
 
     /** 返回完全独立的对局副本，Bot 可以安全地在后台推演。 */
     public GameController copy() {
-        return new GameController(this);
+        return new GameController(this, false);
+    }
+
+    /** 创建供 Bot 推演的轻量副本，不复制棋谱，也不为搜索步骤保存悔棋快照。 */
+    public GameController copyForSearch() {
+        return new GameController(this, true);
     }
 
     public Board getBoard() {
@@ -201,12 +211,16 @@ public class GameController {
     /** 返回当前一方的全部合法走法。 */
     public List<Move> getAllLegalMoves() {
         if (gameState.isGameOver()) return Collections.emptyList();
-        List<Move> moves = new ArrayList<>();
+        List<Move> moves = new ArrayList<>(32);
         for (int fromRow = 0; fromRow < Board.SIZE_X; fromRow++) {
             for (int fromCol = 0; fromCol < Board.SIZE_Y; fromCol++) {
                 if (!isCurrentPlayerPiece(board.getPiece(fromRow, fromCol))) continue;
-                for (Square target : getLegalMoves(fromRow, fromCol)) {
-                    moves.add(new Move(fromRow, fromCol, target.getRow(), target.getCol()));
+                for (int toRow = 0; toRow < Board.SIZE_X; toRow++) {
+                    for (int toCol = 0; toCol < Board.SIZE_Y; toCol++) {
+                        if (isLegalMove(fromRow, fromCol, toRow, toCol)) {
+                            moves.add(new Move(fromRow, fromCol, toRow, toCol));
+                        }
+                    }
                 }
             }
         }
@@ -229,12 +243,14 @@ public class GameController {
 
         int[][] data = board.getBoard();
         int movingPiece = data[fromRow][fromCol];
-        String notation = moveNotation(movingPiece, fromRow, fromCol, toRow, toCol,
+        String notation = searchMode ? null : moveNotation(movingPiece, fromRow, fromCol, toRow, toCol,
                 data[toRow][toCol] != 0 || isEnPassantMove(fromRow, fromCol, toRow, toCol));
         boolean pawnMoved = Math.abs(movingPiece) == 1;
         boolean enPassant = isEnPassantMove(fromRow, fromCol, toRow, toCol);
         boolean captured = data[toRow][toCol] != 0 || enPassant;
-        moveSnapshots.push(new Snapshot(this));
+        if (!searchMode) {
+            moveSnapshots.push(new Snapshot(this));
+        }
         updateCastlingRightsBeforeMove(movingPiece, fromRow, fromCol, toRow, toCol);
 
         if (isCastlingMove(fromRow, fromCol, toRow, toCol)) {
@@ -252,7 +268,7 @@ public class GameController {
         if (pawnMoved && (toRow == 0 || toRow == 7)) {
             int promotedType = isPromotionPiece(promotionPiece) ? promotionPiece : Queen.WHITE_QUEEN;
             data[toRow][toCol] = movingPiece > 0 ? promotedType : -promotedType;
-            notation += "=" + pieceLetter(promotedType);
+            if (!searchMode) notation += "=" + pieceLetter(promotedType);
         }
 
         enPassantPawnRow = pawnMoved && Math.abs(toRow - fromRow) == 2 ? toRow : -1;
@@ -262,11 +278,11 @@ public class GameController {
         updateEndState();
         if (gameState.getResult() == GameState.Result.WHITE_WINS_BY_CHECKMATE
                 || gameState.getResult() == GameState.Result.BLACK_WINS_BY_CHECKMATE) {
-            notation += "#";
+            if (!searchMode) notation += "#";
         } else if (MoveRule.isKingInCheck(data, whiteTurn)) {
-            notation += "+";
+            if (!searchMode) notation += "+";
         }
-        moveHistory.add(notation);
+        if (!searchMode) moveHistory.add(notation);
         undoRequester = null;
         return true;
     }
@@ -441,10 +457,13 @@ public class GameController {
     }
 
     private boolean hasAnyLegalMove() {
-        for (int row = 0; row < Board.SIZE_X; row++) {
-            for (int col = 0; col < Board.SIZE_Y; col++) {
-                if (!getLegalMoves(row, col).isEmpty()) {
-                    return true;
+        for (int fromRow = 0; fromRow < Board.SIZE_X; fromRow++) {
+            for (int fromCol = 0; fromCol < Board.SIZE_Y; fromCol++) {
+                if (!isCurrentPlayerPiece(board.getPiece(fromRow, fromCol))) continue;
+                for (int toRow = 0; toRow < Board.SIZE_X; toRow++) {
+                    for (int toCol = 0; toCol < Board.SIZE_Y; toCol++) {
+                        if (isLegalMove(fromRow, fromCol, toRow, toCol)) return true;
+                    }
                 }
             }
         }
